@@ -1,18 +1,16 @@
 """
 GD Participant Audio Session
 
-Keeps participant identity attached to audio throughout
-the GD processing pipeline.
+A participant's microphone belongs to:
 
-IMPORTANT:
+    session_id
+    participant_id
 
 No speaker diarization is used.
 
-The application already knows who owns the audio:
-
-    session_id + participant_id
+The participant identity comes from authentication/session
+information, not from voice recognition.
 """
-
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,103 +18,121 @@ from typing import Any
 
 @dataclass
 class ParticipantAudio:
-    """
-    Represents the audio and processing data belonging
-    to one authenticated GD participant.
-    """
+
+    # --------------------------------------------------
+    # IDENTITY
+    # --------------------------------------------------
 
     session_id: str
     participant_id: str
+
+    # --------------------------------------------------
+    # AUDIO
+    # --------------------------------------------------
 
     sample_rate: int = 16000
 
     audio_path: str | None = None
 
+    # --------------------------------------------------
+    # SESSION TIMING
+    # --------------------------------------------------
+
+    session_start_time: float | None = None
+
+    session_end_time: float | None = None
+
+    # --------------------------------------------------
+    # METADATA
+    # --------------------------------------------------
+
     metadata: dict[str, Any] = field(
         default_factory=dict
     )
+
+    # --------------------------------------------------
+    # VAD
+    # --------------------------------------------------
 
     vad_segments: list[dict[str, Any]] = field(
         default_factory=list
     )
 
+    # --------------------------------------------------
+    # ASR
+    # --------------------------------------------------
+
     transcript_segments: list[dict[str, Any]] = field(
         default_factory=list
     )
+
+    # --------------------------------------------------
+    # VAD SEGMENT
+    # --------------------------------------------------
 
     def add_vad_segment(
         self,
         start: float,
         end: float,
-    ) -> None:
-        """
-        Add one VAD speech segment.
-        """
-
-        start = float(start)
-        end = float(end)
-
-        if end < start:
-            raise ValueError(
-                "VAD segment end cannot be before start."
-            )
+    ):
 
         self.vad_segments.append(
             {
-                "start": start,
-                "end": end,
-                "duration": end - start,
+                "start": float(start),
+                "end": float(end),
+                "duration": float(end - start),
             }
         )
+
+    # --------------------------------------------------
+    # TRANSCRIPT SEGMENT
+    # --------------------------------------------------
 
     def add_transcript_segment(
         self,
         start: float,
         end: float,
         text: str,
-    ) -> None:
-        """
-        Add one ASR transcript segment.
-        """
-
-        start = float(start)
-        end = float(end)
-
-        if end < start:
-            raise ValueError(
-                "Transcript segment end cannot be before start."
-            )
-
-        text = str(text).strip()
-
-        if not text:
-            return
+    ):
 
         self.transcript_segments.append(
             {
-                "start": start,
-                "end": end,
-                "duration": end - start,
-                "text": text,
+                "start": float(start),
+                "end": float(end),
+                "duration": float(end - start),
+                "text": text.strip(),
             }
         )
 
+    # --------------------------------------------------
+    # SPEAKING TIME
+    # --------------------------------------------------
+
     @property
     def total_speaking_time(self) -> float:
-        """
-        Total speech duration detected by VAD.
-        """
 
         return sum(
-            float(segment["duration"])
+            segment["duration"]
             for segment in self.vad_segments
         )
 
+    # --------------------------------------------------
+    # WORD COUNT
+    # --------------------------------------------------
+
+    @property
+    def word_count(self) -> int:
+
+        return len(
+            self.transcript.split()
+        )
+
+    # --------------------------------------------------
+    # FULL PARTICIPANT TRANSCRIPT
+    # --------------------------------------------------
+
     @property
     def transcript(self) -> str:
-        """
-        Combine all transcript segments.
-        """
 
         return " ".join(
             segment["text"]
@@ -124,33 +140,54 @@ class ParticipantAudio:
             if segment.get("text")
         )
 
+    # --------------------------------------------------
+    # NUMBER OF TURNS
+    # --------------------------------------------------
+
     @property
-    def word_count(self) -> int:
-        """
-        Number of words in the participant transcript.
-        """
+    def turn_count(self) -> int:
 
         return len(
-            self.transcript.split()
+            self.transcript_segments
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """
-        Convert participant data to a JSON-friendly dictionary.
-        """
+    # --------------------------------------------------
+    # SERIALIZATION
+    # --------------------------------------------------
+
+    def to_dict(self):
 
         return {
             "session_id": self.session_id,
             "participant_id": self.participant_id,
+
             "sample_rate": self.sample_rate,
+
             "audio_path": self.audio_path,
-            "metadata": self.metadata,
-            "vad_segments": self.vad_segments,
-            "transcript_segments": self.transcript_segments,
-            "total_speaking_time": round(
-                self.total_speaking_time,
-                3,
+
+            "session_start_time": (
+                self.session_start_time
             ),
-            "transcript": self.transcript,
+
+            "session_end_time": (
+                self.session_end_time
+            ),
+
+            "metadata": self.metadata,
+
+            "vad_segments": self.vad_segments,
+
+            "transcript_segments": (
+                self.transcript_segments
+            ),
+
+            "total_speaking_time": (
+                self.total_speaking_time
+            ),
+
             "word_count": self.word_count,
+
+            "turn_count": self.turn_count,
+
+            "transcript": self.transcript,
         }
