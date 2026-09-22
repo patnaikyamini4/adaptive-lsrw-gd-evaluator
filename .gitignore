@@ -28,3 +28,7 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+# Generated assessment audio
+data/lsrw/audio/
+test_audio.ogg
+test_audio.ogg
