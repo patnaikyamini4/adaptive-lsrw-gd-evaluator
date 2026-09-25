@@ -21,6 +21,9 @@ import torch
 import whisper
 
 
+_shared_asr_service: "ASRService | None" = None
+
+
 class ASRService:
     """
     Shared Whisper ASR service.
@@ -449,3 +452,30 @@ class ASRService:
 
             "device": self.device,
         }
+
+
+def transcribe_audio(
+    audio_path: str,
+    language: str | None = "en",
+) -> dict[str, Any]:
+    """
+    Compatibility wrapper for LSRW callers.
+
+    The shared Whisper model is created only on the first call and is
+    reused thereafter. GD continues to use ASRService.transcribe_segments().
+    """
+
+    global _shared_asr_service
+
+    if _shared_asr_service is None:
+        _shared_asr_service = ASRService()
+
+    result = _shared_asr_service.transcribe(
+        audio_path=audio_path,
+        language=language,
+    )
+
+    return {
+        **result,
+        "transcript": result["text"],
+    }

@@ -1,8 +1,8 @@
 """
 GD Transcript Service
 
-Combines individual participant transcripts into a
-chronological group discussion transcript.
+Combines individual participant transcripts
+into a shared GD session timeline.
 
 IMPORTANT:
 
@@ -12,6 +12,12 @@ Participant identity comes from:
 
     session_id
     participant_id
+
+Each participant has a local audio clock.
+
+The shared GD timeline is calculated using:
+
+    local timestamp + session_offset
 """
 
 
@@ -22,8 +28,8 @@ from .audio_session import ParticipantAudio
 
 class GDTranscriptService:
     """
-    Handles participant transcripts and combines
-    them into a chronological GD transcript.
+    Handles participant transcripts and converts
+    them into a shared GD session timeline.
     """
 
     def build_participant_transcript(
@@ -35,15 +41,34 @@ class GDTranscriptService:
         """
 
         return {
-            "session_id": participant.session_id,
-            "participant_id": participant.participant_id,
-            "transcript": participant.transcript,
-            "word_count": participant.word_count,
+            "session_id": (
+                participant.session_id
+            ),
+
+            "participant_id": (
+                participant.participant_id
+            ),
+
+            "transcript": (
+                participant.transcript
+            ),
+
+            "word_count": (
+                participant.word_count
+            ),
+
             "speaking_time": round(
                 participant.total_speaking_time,
                 3,
             ),
-            "segments": participant.transcript_segments,
+
+            "segments": (
+                participant.transcript_segments
+            ),
+
+            "session_offset": (
+                participant.session_offset
+            ),
         }
 
     def build_group_transcript(
@@ -51,48 +76,36 @@ class GDTranscriptService:
         participants: list[ParticipantAudio],
     ) -> list[dict[str, Any]]:
         """
-        Combine all participant transcript segments
-        and sort them chronologically.
+        Combine participant transcript segments
+        using the shared GD session clock.
         """
 
         group_segments: list[dict[str, Any]] = []
 
         for participant in participants:
 
-            for segment in participant.transcript_segments:
-
-                start = float(
-                    segment["start"]
-                )
-
-                end = float(
-                    segment["end"]
-                )
+            for segment in (
+                participant.transcript_segments
+            ):
 
                 text = str(
-                    segment.get("text", "")
+                    segment.get(
+                        "text",
+                        "",
+                    )
                 ).strip()
 
                 if not text:
                     continue
 
-                # Calculate duration here instead of
-                # depending on the source segment.
-                duration = end - start
+                session_segment = (
+                    participant.get_session_segment(
+                        segment
+                    )
+                )
 
                 group_segments.append(
-                    {
-                        "session_id": (
-                            participant.session_id
-                        ),
-                        "participant_id": (
-                            participant.participant_id
-                        ),
-                        "start": start,
-                        "end": end,
-                        "duration": duration,
-                        "text": text,
-                    }
+                    session_segment
                 )
 
         group_segments.sort(
@@ -110,16 +123,12 @@ class GDTranscriptService:
     ) -> str:
         """
         Create readable chronological GD text.
-
-        Example:
-
-        [P001] I think AI is useful.
-        [P002] I agree with that point.
-        [P003] There are also some risks.
         """
 
-        segments = self.build_group_transcript(
-            participants
+        segments = (
+            self.build_group_transcript(
+                participants
+            )
         )
 
         lines: list[str] = []
@@ -150,17 +159,33 @@ class GDTranscriptService:
             participant.total_speaking_time
         )
 
-        word_count = participant.word_count
+        word_count = (
+            participant.word_count
+        )
 
         return {
-            "session_id": participant.session_id,
-            "participant_id": participant.participant_id,
+            "session_id": (
+                participant.session_id
+            ),
+
+            "participant_id": (
+                participant.participant_id
+            ),
+
             "speaking_time": round(
                 speaking_time,
                 3,
             ),
-            "word_count": word_count,
+
+            "word_count": (
+                word_count
+            ),
+
             "transcript_segments": len(
                 participant.transcript_segments
+            ),
+
+            "session_offset": (
+                participant.session_offset
             ),
         }
