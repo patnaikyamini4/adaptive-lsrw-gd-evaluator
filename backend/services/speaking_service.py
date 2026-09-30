@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.services.golden_answer_service import get_golden_answer
 from backend.services.lsrw_evaluation_service import LSRWEvaluationService
@@ -75,7 +75,7 @@ class SpeakingService:
             "asr": evaluation["asr"],
 
             "started_at": None,
-            "submitted_at": datetime.utcnow(),
+            "submitted_at": datetime.now(timezone.utc),
 
             "evaluation": evaluation,
             "score": None,

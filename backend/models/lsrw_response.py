@@ -14,6 +14,7 @@ class LSRWResponse:
     response_text: Optional[str] = None
     audio_path: Optional[str] = None
     transcript: Optional[str] = None
+    asr: Optional[dict] = None
 
     started_at: Optional[datetime] = None
     submitted_at: Optional[datetime] = None
@@ -30,6 +31,7 @@ class LSRWResponse:
             "response_text": self.response_text,
             "audio_path": self.audio_path,
             "transcript": self.transcript,
+            "asr": self.asr,
             "started_at": self.started_at,
             "submitted_at": self.submitted_at,
             "evaluation": self.evaluation,

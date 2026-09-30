@@ -233,6 +233,15 @@ def start_lsrw_module(session_id):
     }), 200
 
 
+def _cleanup_file(file_path):
+    if file_path:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+
 # ==================================================
 # SUBMIT RESPONSE
 # ==================================================
@@ -264,7 +273,24 @@ def submit_response(session_id):
         }), 404
 
     # ----------------------------------------------
-    # 2. Check current module
+    # 2. Check session status
+    # ----------------------------------------------
+
+    if session.get("status") in ["COMPLETED", "SCHEDULED"] or session.get("status") not in [
+        "ACTIVE",
+        "LISTENING",
+        "SPEAKING",
+        "READING",
+        "WRITING"
+    ]:
+        return jsonify({
+            "status": "error",
+            "message": "Session is not active",
+            "current_status": session.get("status")
+        }), 400
+
+    # ----------------------------------------------
+    # 3. Check current module
     # ----------------------------------------------
 
     module = session.get("current_module")
@@ -281,7 +307,7 @@ def submit_response(session_id):
         }), 400
 
     # ----------------------------------------------
-    # 3. Get question ID
+    # 4. Get question ID
     # ----------------------------------------------
 
     question_id = session.get(
@@ -296,7 +322,7 @@ def submit_response(session_id):
         }), 400
 
     # ----------------------------------------------
-    # 4. Get participant ID
+    # 5. Get participant ID
     # ----------------------------------------------
 
     participant_id = session.get(
@@ -311,7 +337,7 @@ def submit_response(session_id):
         }), 400
 
     # ----------------------------------------------
-    # 5. Check uploaded audio
+    # 6. Check uploaded audio
     # ----------------------------------------------
 
     if "audio" not in request.files:
@@ -331,7 +357,7 @@ def submit_response(session_id):
         }), 400
 
     # ----------------------------------------------
-    # 6. Create audio directory
+    # 7. Create audio directory
     # ----------------------------------------------
 
     audio_directory = os.path.join(
@@ -347,7 +373,7 @@ def submit_response(session_id):
     )
 
     # ----------------------------------------------
-    # 7. Create unique filename
+    # 8. Create unique filename
     # ----------------------------------------------
 
     original_filename = secure_filename(
@@ -375,23 +401,23 @@ def submit_response(session_id):
     )
 
     # ----------------------------------------------
-    # 8. Save audio
+    # 9. Save audio
     # ----------------------------------------------
 
     try:
 
         audio_file.save(audio_path)
 
-    except Exception as e:
+    except Exception:
 
+        _cleanup_file(audio_path)
         return jsonify({
             "status": "error",
-            "message": "Failed to save audio file",
-            "error": str(e)
+            "message": "Failed to save audio file"
         }), 500
 
     # ----------------------------------------------
-    # 9. Process audio with Speaking Service
+    # 10. Process audio with Speaking Service
     # ----------------------------------------------
 
     try:
@@ -403,36 +429,40 @@ def submit_response(session_id):
             question_id=question_id
         )
 
-    except Exception as e:
+    except ValueError as e:
 
+        _cleanup_file(audio_path)
         return jsonify({
             "status": "error",
-            "message": (
-                "Speaking audio processing failed"
-            ),
-            "error": str(e)
+            "message": str(e)
+        }), 400
+
+    except Exception:
+
+        _cleanup_file(audio_path)
+        return jsonify({
+            "status": "error",
+            "message": "Speaking audio processing failed"
         }), 500
 
     # ----------------------------------------------
-    # 10. Save response to MongoDB
+    # 11. Save response to MongoDB
     # ----------------------------------------------
 
     try:
 
         create_response(response)
 
-    except Exception as e:
+    except Exception:
 
+        _cleanup_file(audio_path)
         return jsonify({
             "status": "error",
-            "message": (
-                "Failed to save speaking response"
-            ),
-            "error": str(e)
+            "message": "Failed to save speaking response"
         }), 500
 
     # ----------------------------------------------
-    # 11. Return response
+    # 12. Return response
     # ----------------------------------------------
 
     return jsonify({
