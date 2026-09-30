@@ -4,6 +4,7 @@ from backend.services.mongodb import db
 
 
 collection = db["golden_answers"]
+golden_answers_collection = collection
 
 
 def save_golden_answer(
@@ -11,7 +12,8 @@ def save_golden_answer(
     expert_answer_1,
     expert_answer_2,
     golden_answer,
-    key_points
+    key_points,
+    question_id=None,
 ):
     """
     Save a generated Golden Answer to MongoDB.
@@ -29,6 +31,25 @@ def save_golden_answer(
         "created_at": datetime.now(timezone.utc)
     }
 
+    if question_id is not None:
+        document["question_id"] = question_id
+
     result = collection.insert_one(document)
 
     return str(result.inserted_id)
+
+
+def get_golden_answer(question_id):
+    """
+    Retrieve a Golden Answer document by question_id from MongoDB.
+
+    Returns the document dictionary without MongoDB's '_id', or None if not found.
+    """
+    document = collection.find_one({"question_id": question_id})
+
+    if document is None:
+        return None
+
+    document_copy = document.copy()
+    document_copy.pop("_id", None)
+    return document_copy
