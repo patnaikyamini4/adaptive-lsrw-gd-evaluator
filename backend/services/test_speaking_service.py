@@ -30,6 +30,18 @@ def test_speaking_service_success(tmp_path):
             "model": "all-MiniLM-L6-v2",
             "similarity": 0.8520,
         },
+        "score": {
+            "final_score": 85.2,
+            "components": {
+                "semantic": {
+                    "raw_similarity": 0.8520,
+                    "score": 85.2,
+                    "weight": 1.0,
+                }
+            },
+            "scoring_method": "deterministic_semantic_v1",
+            "version": "1.0",
+        },
     }
 
     mock_eval_service = MagicMock()
@@ -64,7 +76,8 @@ def test_speaking_service_success(tmp_path):
     assert response["transcript"] == "Online education gives flexibility to students."
     assert response["asr"] == fake_evaluation["asr"]
     assert response["evaluation"] == fake_evaluation
-    assert response["score"] is None
+    assert response["score"] == 85.2
+    assert 0.0 <= response["score"] <= 100.0
     assert response["started_at"] is None
     assert response["submitted_at"] is not None
     assert response["submitted_at"].tzinfo is not None
@@ -95,3 +108,54 @@ def test_speaking_service_missing_golden_answer(tmp_path):
                 participant_id="candidate-456",
                 question_id="speaking-q1",
             )
+
+
+def test_lsrw_evaluation_service_pipeline():
+    from backend.services.lsrw_evaluation_service import LSRWEvaluationService
+
+    fake_asr = {
+        "text": "Candidate speaking answer.",
+        "transcript": "Candidate speaking answer.",
+        "segments": [],
+        "language": "en",
+    }
+    fake_semantic = {
+        "model": "all-MiniLM-L6-v2",
+        "similarity": 0.75,
+    }
+
+    mock_scoring = MagicMock()
+    mock_scoring.calculate_score.return_value = {
+        "final_score": 75.0,
+        "components": {
+            "semantic": {"raw_similarity": 0.75, "score": 75.0, "weight": 1.0}
+        },
+        "scoring_method": "deterministic_semantic_v1",
+        "version": "1.0",
+    }
+
+    eval_service = LSRWEvaluationService(scoring_service=mock_scoring)
+
+    with patch("backend.services.lsrw_evaluation_service.transcribe_audio", return_value=fake_asr) as mock_asr, \
+         patch("backend.services.lsrw_evaluation_service.evaluate_semantic_similarity", return_value=fake_semantic) as mock_sem:
+
+        res = eval_service.evaluate_speaking(
+            audio_path="test.wav",
+            question_id="SP001",
+            golden_answer="Golden answer text.",
+        )
+
+    mock_asr.assert_called_once_with("test.wav")
+    mock_sem.assert_called_once_with("Golden answer text.", "Candidate speaking answer.")
+    mock_scoring.calculate_score.assert_called_once_with(
+        transcript="Candidate speaking answer.",
+        semantic_similarity=0.75,
+        asr_result=fake_asr,
+    )
+
+    assert res["module"] == "SPEAKING"
+    assert res["question_id"] == "SP001"
+    assert res["transcript"] == "Candidate speaking answer."
+    assert res["asr"] == fake_asr
+    assert res["semantic"] == fake_semantic
+    assert res["score"]["final_score"] == 75.0

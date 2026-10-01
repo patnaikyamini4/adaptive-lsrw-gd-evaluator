@@ -1,8 +1,12 @@
 from backend.ai.asr_service import transcribe_audio
 from backend.ai.semantic_agent import evaluate_semantic_similarity
+from backend.services.speaking_scoring_service import SpeakingScoringService
 
 
 class LSRWEvaluationService:
+
+    def __init__(self, scoring_service=None):
+        self.scoring_service = scoring_service or SpeakingScoringService()
 
     def evaluate_speaking(
         self,
@@ -21,11 +25,19 @@ class LSRWEvaluationService:
             transcript
         )
 
-        # 3. Return complete evaluation
+        # 3. Calculate deterministic speaking score
+        score_breakdown = self.scoring_service.calculate_score(
+            transcript=transcript,
+            semantic_similarity=semantic_result.get("similarity", 0.0),
+            asr_result=asr_result,
+        )
+
+        # 4. Return complete evaluation
         return {
             "module": "SPEAKING",
             "question_id": question_id,
             "transcript": transcript,
             "asr": asr_result,
-            "semantic": semantic_result
+            "semantic": semantic_result,
+            "score": score_breakdown,
         }

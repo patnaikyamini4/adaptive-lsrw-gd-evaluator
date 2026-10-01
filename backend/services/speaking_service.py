@@ -62,6 +62,10 @@ class SpeakingService:
         # 3. Create response object
         # ------------------------------------------
 
+        final_score = None
+        if "score" in evaluation and isinstance(evaluation["score"], dict):
+            final_score = evaluation["score"].get("final_score")
+
         response = {
             "session_id": session_id,
             "participant_id": participant_id,
@@ -78,7 +82,7 @@ class SpeakingService:
             "submitted_at": datetime.now(timezone.utc),
 
             "evaluation": evaluation,
-            "score": None,
+            "score": final_score,
         }
 
         return response

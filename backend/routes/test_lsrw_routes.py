@@ -186,8 +186,20 @@ def test_submit_response_success(client):
             "transcript": "Online education is flexible.",
             "asr": {"transcript": "Online education is flexible."},
             "semantic": {"model": "all-MiniLM-L6-v2", "similarity": 0.85},
+            "score": {
+                "final_score": 85.0,
+                "components": {
+                    "semantic": {
+                        "raw_similarity": 0.85,
+                        "score": 85.0,
+                        "weight": 1.0,
+                    }
+                },
+                "scoring_method": "deterministic_semantic_v1",
+                "version": "1.0",
+            },
         },
-        "score": None,
+        "score": 85.0,
     }
 
     with patch("backend.routes.lsrw_routes.get_session", return_value=fake_session), \
@@ -210,6 +222,7 @@ def test_submit_response_success(client):
         assert res["transcript"] == "Online education is flexible."
         assert res["asr"] == {"transcript": "Online education is flexible."}
         assert res["evaluation"]["semantic"]["similarity"] == 0.85
-        assert res["score"] is None
+        assert res["evaluation"]["score"]["final_score"] == 85.0
+        assert res["score"] == 85.0
+        assert 0.0 <= res["score"] <= 100.0
         mock_create_resp.assert_called_once_with(fake_response)
-
