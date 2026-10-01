@@ -67,6 +67,7 @@ def test_speaking_service_success(tmp_path):
     assert response["score"] is None
     assert response["started_at"] is None
     assert response["submitted_at"] is not None
+    assert response["submitted_at"].tzinfo is not None
 
 
 def test_speaking_service_missing_audio():
