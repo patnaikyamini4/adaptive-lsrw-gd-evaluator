@@ -233,6 +233,82 @@ def start_lsrw_module(session_id):
     }), 200
 
 
+# ==================================================
+# FINISH LSRW MODULE
+# ==================================================
+
+@lsrw_bp.route(
+    "/sessions/<session_id>/module/finish",
+    methods=["POST"]
+)
+def finish_lsrw_module(session_id):
+
+    session = get_session(session_id)
+
+    if not session:
+        return jsonify({
+            "status": "error",
+            "message": "Session not found"
+        }), 404
+
+    module = session.get("current_module")
+
+    if not module:
+        return jsonify({
+            "status": "error",
+            "message": "No active module"
+        }), 400
+
+    session = session_service.finish_module(
+        session
+    )
+
+    updated_session = update_session(
+        session_id,
+        session
+    )
+
+    return jsonify({
+        "status": "success",
+        "message": f"{module} module finished",
+        "session": updated_session
+    }), 200
+
+
+# ==================================================
+# FINISH LSRW SESSION
+# ==================================================
+
+@lsrw_bp.route(
+    "/sessions/<session_id>/finish",
+    methods=["POST"]
+)
+def finish_lsrw_session(session_id):
+
+    session = get_session(session_id)
+
+    if not session:
+        return jsonify({
+            "status": "error",
+            "message": "Session not found"
+        }), 404
+
+    session = session_service.finish_session(
+        session
+    )
+
+    updated_session = update_session(
+        session_id,
+        session
+    )
+
+    return jsonify({
+        "status": "success",
+        "message": "LSRW session finished",
+        "session": updated_session
+    }), 200
+
+
 def _cleanup_file(file_path):
     if file_path:
         try:

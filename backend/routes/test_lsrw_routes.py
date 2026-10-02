@@ -226,3 +226,85 @@ def test_submit_response_success(client):
         assert res["score"] == 85.0
         assert 0.0 <= res["score"] <= 100.0
         mock_create_resp.assert_called_once_with(fake_response)
+
+
+def test_finish_module_session_not_found(client):
+    with patch("backend.routes.lsrw_routes.get_session", return_value=None):
+        resp = client.post("/api/lsrw/sessions/nonexistent-session/module/finish")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert data["message"] == "Session not found"
+
+
+def test_finish_module_no_active_module(client):
+    fake_session = {
+        "session_id": "session-1",
+        "participant_id": "p1",
+        "status": "ACTIVE",
+        "current_module": None,
+        "current_question_id": None,
+    }
+    with patch("backend.routes.lsrw_routes.get_session", return_value=fake_session):
+        resp = client.post("/api/lsrw/sessions/session-1/module/finish")
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert data["message"] == "No active module"
+
+
+def test_finish_module_success(client):
+    fake_session = {
+        "session_id": "session-1",
+        "participant_id": "p1",
+        "status": "SPEAKING",
+        "current_module": "SPEAKING",
+        "current_question_id": "SP001",
+        "completed_modules": [],
+    }
+
+    with patch("backend.routes.lsrw_routes.get_session", return_value=fake_session), \
+         patch("backend.routes.lsrw_routes.update_session", side_effect=lambda sid, s: s) as mock_update:
+        resp = client.post("/api/lsrw/sessions/session-1/module/finish")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["message"] == "SPEAKING module finished"
+        session_data = data["session"]
+        assert session_data["status"] == "ACTIVE"
+        assert session_data["current_module"] is None
+        assert session_data["current_question_id"] is None
+        assert session_data["completed_modules"] == ["SPEAKING"]
+        mock_update.assert_called_once()
+
+
+def test_finish_session_not_found(client):
+    with patch("backend.routes.lsrw_routes.get_session", return_value=None):
+        resp = client.post("/api/lsrw/sessions/nonexistent-session/finish")
+        assert resp.status_code == 404
+        data = resp.get_json()
+        assert data["status"] == "error"
+        assert data["message"] == "Session not found"
+
+
+def test_finish_session_success(client):
+    fake_session = {
+        "session_id": "session-1",
+        "participant_id": "p1",
+        "status": "ACTIVE",
+        "current_module": None,
+        "completed_modules": ["SPEAKING"],
+        "session_ended_at": None,
+    }
+
+    with patch("backend.routes.lsrw_routes.get_session", return_value=fake_session), \
+         patch("backend.routes.lsrw_routes.update_session", side_effect=lambda sid, s: s) as mock_update:
+        resp = client.post("/api/lsrw/sessions/session-1/finish")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "success"
+        assert data["message"] == "LSRW session finished"
+        session_data = data["session"]
+        assert session_data["status"] == "COMPLETED"
+        assert session_data["session_ended_at"] is not None
+        mock_update.assert_called_once()
