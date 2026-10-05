@@ -134,9 +134,12 @@ def test_start_session_success(client, sample_session):
     active_session["session_started_at"] = "2026-10-05T00:01:00Z"
 
     mock_service = MagicMock()
-    mock_service.start_session.return_value = active_session
+    mock_service.start_session.return_value = {
+        "session": active_session,
+        "runtime": {"started": True, "session_time": 0.0},
+    }
 
-    with patch("backend.routes.gd_routes.gd_session_service", mock_service):
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
         response = client.post("/api/gd/sessions/GD-SESSION-500/start")
 
     assert response.status_code == 200
@@ -150,7 +153,7 @@ def test_start_session_invalid_transition(client):
     mock_service = MagicMock()
     mock_service.start_session.side_effect = ValueError("Cannot start GD session in 'ACTIVE' status. Must be 'SCHEDULED'.")
 
-    with patch("backend.routes.gd_routes.gd_session_service", mock_service):
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
         response = client.post("/api/gd/sessions/GD-SESSION-500/start")
 
     assert response.status_code == 400
@@ -169,9 +172,12 @@ def test_end_session_success(client, sample_session):
     ended_session["session_duration"] = 540.0
 
     mock_service = MagicMock()
-    mock_service.end_session.return_value = ended_session
+    mock_service.end_session.return_value = {
+        "session": ended_session,
+        "runtime": {"ended": True, "session_time": 540.0},
+    }
 
-    with patch("backend.routes.gd_routes.gd_session_service", mock_service):
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
         response = client.post("/api/gd/sessions/GD-SESSION-500/end")
 
     assert response.status_code == 200
@@ -186,7 +192,7 @@ def test_end_session_invalid_transition(client):
     mock_service = MagicMock()
     mock_service.end_session.side_effect = ValueError("Cannot end GD session in 'SCHEDULED' status. Must be 'ACTIVE'.")
 
-    with patch("backend.routes.gd_routes.gd_session_service", mock_service):
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
         response = client.post("/api/gd/sessions/GD-SESSION-500/end")
 
     assert response.status_code == 400
@@ -301,3 +307,124 @@ def test_delete_session_not_found(client):
 
     assert response.status_code == 404
     assert response.get_json()["status"] == "error"
+
+
+# ==============================================================================
+# 8. LIVE RUNTIME ROUTES (JOIN, LEAVE, RUNTIME STATUS)
+# ==============================================================================
+
+def test_join_participant_route_success(client):
+    """Test POST /api/gd/sessions/<session_id>/join route success."""
+    mock_service = MagicMock()
+    mock_service.join_participant.return_value = {
+        "session_id": "GD-SESSION-500",
+        "participant_id": "P001",
+        "connected": True,
+        "runtime": {"participants": {"P001": {"connected": True}}},
+    }
+
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
+        response = client.post(
+            "/api/gd/sessions/GD-SESSION-500/join",
+            json={"participant_id": "P001"},
+        )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "success"
+    assert data["connected"] is True
+    assert data["participant_id"] == "P001"
+
+
+def test_join_participant_route_validation_errors(client):
+    """Test validation errors for join route."""
+    # Missing json body
+    res1 = client.post("/api/gd/sessions/GD-SESSION-500/join", data="not-json", content_type="application/json")
+    assert res1.status_code == 400
+
+    # Missing participant_id
+    res2 = client.post("/api/gd/sessions/GD-SESSION-500/join", json={})
+    assert res2.status_code == 400
+    assert "'participant_id' is required" in res2.get_json()["message"]
+
+
+def test_join_participant_route_not_found(client):
+    """Test join route 404 when session not found."""
+    mock_service = MagicMock()
+    mock_service.join_participant.side_effect = ValueError("GD session 'NON-EXISTENT' not found")
+
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
+        response = client.post(
+            "/api/gd/sessions/NON-EXISTENT/join",
+            json={"participant_id": "P001"},
+        )
+
+    assert response.status_code == 404
+
+
+def test_leave_participant_route_success(client):
+    """Test POST /api/gd/sessions/<session_id>/leave route success."""
+    mock_service = MagicMock()
+    mock_service.leave_participant.return_value = {
+        "session_id": "GD-SESSION-500",
+        "participant_id": "P001",
+        "connected": False,
+        "runtime": {"participants": {"P001": {"connected": False}}},
+    }
+
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
+        response = client.post(
+            "/api/gd/sessions/GD-SESSION-500/leave",
+            json={"participant_id": "P001"},
+        )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "success"
+    assert data["connected"] is False
+    assert data["participant_id"] == "P001"
+
+
+def test_leave_participant_route_validation_errors(client):
+    """Test validation errors for leave route."""
+    # Missing json body
+    res1 = client.post("/api/gd/sessions/GD-SESSION-500/leave", data="not-json", content_type="application/json")
+    assert res1.status_code == 400
+
+    # Missing participant_id
+    res2 = client.post("/api/gd/sessions/GD-SESSION-500/leave", json={})
+    assert res2.status_code == 400
+    assert "'participant_id' is required" in res2.get_json()["message"]
+
+
+def test_get_runtime_status_route_success(client):
+    """Test GET /api/gd/sessions/<session_id>/runtime route success."""
+    mock_service = MagicMock()
+    mock_service.get_runtime_status.return_value = {
+        "session_id": "GD-SESSION-500",
+        "status": "ACTIVE",
+        "runtime_active": True,
+        "elapsed_time": 45.2,
+        "duration_seconds": 300,
+        "participants": {"P001": {"connected": True}},
+    }
+
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
+        response = client.get("/api/gd/sessions/GD-SESSION-500/runtime")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["status"] == "success"
+    assert data["runtime"]["runtime_active"] is True
+    assert data["runtime"]["elapsed_time"] == 45.2
+
+
+def test_get_runtime_status_route_not_found(client):
+    """Test GET /api/gd/sessions/<session_id>/runtime returns 404 when session not found."""
+    mock_service = MagicMock()
+    mock_service.get_runtime_status.side_effect = ValueError("GD session 'NON-EXISTENT' not found")
+
+    with patch("backend.routes.gd_routes.gd_live_service", mock_service):
+        response = client.get("/api/gd/sessions/NON-EXISTENT/runtime")
+
+    assert response.status_code == 404

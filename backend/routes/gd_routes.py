@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 from flask import Blueprint, jsonify, request
 
+from backend.services.gd_live_service import GDLiveService
 from backend.services.gd_repository import (
     delete_evaluation,
     get_all_evaluations,
@@ -28,6 +29,7 @@ from backend.services.gd_session_service import GDSessionService
 gd_bp = Blueprint("gd", __name__, url_prefix="/api/gd")
 gd_service = GDEvaluationService()
 gd_session_service = GDSessionService()
+gd_live_service = GDLiveService(session_service=gd_session_service)
 
 
 @gd_bp.route("/evaluations", methods=["POST"])
@@ -362,7 +364,7 @@ def get_gd_session(session_id: str):
 @gd_bp.route("/sessions/<session_id>/start", methods=["POST"])
 def start_gd_session(session_id: str):
     """
-    Transition a GD session to ACTIVE state.
+    Transition a GD session to ACTIVE state and initialize live runtime.
     """
     if not session_id or not session_id.strip():
         return jsonify({
@@ -371,7 +373,9 @@ def start_gd_session(session_id: str):
         }), 400
 
     try:
-        session = gd_session_service.start_session(session_id.strip())
+        result = gd_live_service.start_session(session_id.strip())
+        session = result.get("session") if isinstance(result, dict) and "session" in result else result
+        runtime = result.get("runtime") if isinstance(result, dict) else None
     except ValueError as e:
         if "not found" in str(e).lower():
             return jsonify({
@@ -392,13 +396,14 @@ def start_gd_session(session_id: str):
         "status": "success",
         "message": f"GD session '{session_id.strip()}' is now ACTIVE",
         "session": session,
+        "runtime": runtime,
     }), 200
 
 
 @gd_bp.route("/sessions/<session_id>/end", methods=["POST"])
 def end_gd_session(session_id: str):
     """
-    Transition a GD session to ENDED state.
+    Transition a GD session to ENDED state and stop live runtime.
     """
     if not session_id or not session_id.strip():
         return jsonify({
@@ -407,7 +412,9 @@ def end_gd_session(session_id: str):
         }), 400
 
     try:
-        session = gd_session_service.end_session(session_id.strip())
+        result = gd_live_service.end_session(session_id.strip())
+        session = result.get("session") if isinstance(result, dict) and "session" in result else result
+        runtime = result.get("runtime") if isinstance(result, dict) else None
     except ValueError as e:
         if "not found" in str(e).lower():
             return jsonify({
@@ -428,6 +435,7 @@ def end_gd_session(session_id: str):
         "status": "success",
         "message": f"GD session '{session_id.strip()}' has ENDED",
         "session": session,
+        "runtime": runtime,
     }), 200
 
 
@@ -632,4 +640,145 @@ def delete_gd_session(session_id: str):
     return jsonify({
         "status": "success",
         "message": f"GD session for session '{session_id.strip()}' deleted successfully",
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/join", methods=["POST"])
+def join_gd_participant(session_id: str):
+    """
+    Connect an authorized participant to an ACTIVE live GD session.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    data = request.get_json(silent=True)
+    if data is None or not isinstance(data, dict):
+        return jsonify({
+            "status": "error",
+            "message": "Request body must be a valid JSON object",
+        }), 400
+
+    participant_id = data.get("participant_id")
+    if not participant_id or not isinstance(participant_id, str) or not participant_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'participant_id' is required and must be a non-empty string",
+        }), 400
+
+    try:
+        result = gd_live_service.join_participant(session_id.strip(), participant_id.strip())
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to join participant: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "message": f"Participant '{participant_id.strip()}' joined live session",
+        "session_id": session_id.strip(),
+        "participant_id": participant_id.strip(),
+        "connected": result.get("connected", True),
+        "runtime": result.get("runtime"),
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/leave", methods=["POST"])
+def leave_gd_participant(session_id: str):
+    """
+    Disconnect a participant from an ACTIVE live GD session.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    data = request.get_json(silent=True)
+    if data is None or not isinstance(data, dict):
+        return jsonify({
+            "status": "error",
+            "message": "Request body must be a valid JSON object",
+        }), 400
+
+    participant_id = data.get("participant_id")
+    if not participant_id or not isinstance(participant_id, str) or not participant_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'participant_id' is required and must be a non-empty string",
+        }), 400
+
+    try:
+        result = gd_live_service.leave_participant(session_id.strip(), participant_id.strip())
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to leave participant: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "message": f"Participant '{participant_id.strip()}' left live session",
+        "session_id": session_id.strip(),
+        "participant_id": participant_id.strip(),
+        "connected": result.get("connected", False),
+        "runtime": result.get("runtime"),
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/runtime", methods=["GET"])
+def get_gd_session_runtime(session_id: str):
+    """
+    Retrieve live runtime status for a GD session.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    try:
+        runtime_status = gd_live_service.get_runtime_status(session_id.strip())
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve runtime status: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "runtime": runtime_status,
     }), 200
