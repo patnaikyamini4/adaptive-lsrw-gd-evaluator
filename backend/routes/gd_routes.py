@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 from flask import Blueprint, jsonify, request
 
+from backend.services.gd_live_audio_service import GDLiveAudioService
 from backend.services.gd_live_service import GDLiveService
 from backend.services.gd_repository import (
     delete_evaluation,
@@ -30,6 +31,10 @@ gd_bp = Blueprint("gd", __name__, url_prefix="/api/gd")
 gd_service = GDEvaluationService()
 gd_session_service = GDSessionService()
 gd_live_service = GDLiveService(session_service=gd_session_service)
+gd_live_audio_service = GDLiveAudioService(
+    session_service=gd_session_service,
+    live_service=gd_live_service,
+)
 
 
 @gd_bp.route("/evaluations", methods=["POST"])
@@ -781,4 +786,77 @@ def get_gd_session_runtime(session_id: str):
     return jsonify({
         "status": "success",
         "runtime": runtime_status,
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/audio", methods=["POST"])
+def process_gd_audio_event(session_id: str):
+    """
+    Process one participant-scoped live audio event for an ACTIVE GD session.
+    Delegates processing directly to GDLiveAudioService.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    data = request.get_json(silent=True)
+    if data is None or not isinstance(data, dict):
+        return jsonify({
+            "status": "error",
+            "message": "Request body must be a valid JSON object",
+        }), 400
+
+    participant_id = data.get("participant_id")
+    if not participant_id or not isinstance(participant_id, str) or not participant_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'participant_id' is required and must be a non-empty string",
+        }), 400
+
+    audio_path = data.get("audio_path")
+    if not audio_path or not isinstance(audio_path, str) or not audio_path.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'audio_path' is required and must be a non-empty string",
+        }), 400
+
+    try:
+        result = gd_live_audio_service.process_audio_event(
+            session_id=session_id.strip(),
+            participant_id=participant_id.strip(),
+            audio_path=audio_path.strip(),
+        )
+    except FileNotFoundError as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 404
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except RuntimeError as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to process live audio event: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "message": f"Audio event processed for participant '{participant_id.strip()}'",
+        "result": result,
+        **result,
     }), 200
