@@ -17,8 +17,8 @@ class LiveAudioEvent:
     session_id: str
     participant_id: str
 
-    session_start: float
-    session_end: float
+    session_start: float = 0.0
+    session_end: float = 0.0
 
     audio_path: str | None = None
     transcript: str = ""
