@@ -38,3 +38,5 @@ uploads/
 
 # Postman workspace config
 .postman/
+# Postman workspace scaffold
+postman/
