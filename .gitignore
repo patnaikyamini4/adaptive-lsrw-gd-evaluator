@@ -32,3 +32,9 @@ temp/
 data/gd/audio/
 data/gd/outputs/
 data/lsrw/audio/
+
+# Uploads & Runtime files
+uploads/
+
+# Postman workspace config
+.postman/
