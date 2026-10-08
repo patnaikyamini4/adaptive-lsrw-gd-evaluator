@@ -334,3 +334,95 @@ def test_start_session_runtime_error_rolls_back_persistent_state(sample_schedule
         "GD-LIVE-100",
         {"status": "SCHEDULED", "session_started_at": None},
     )
+
+
+# ==============================================================================
+# 6. LIVE TRANSCRIPT & LIVE EVALUATION TESTS
+# ==============================================================================
+
+def test_get_transcript_active_and_empty(live_service, sample_scheduled_session):
+    """Test get_transcript returns structured transcript data."""
+    # Before start (fallback)
+    t1 = live_service.get_transcript("GD-LIVE-100")
+    assert t1["session_id"] == "GD-LIVE-100"
+    assert t1["segment_count"] == 0
+    assert t1["group_segments"] == []
+
+    # After start with segments added
+    live_service.start_session("GD-LIVE-100")
+    runtime = live_service.get_runtime("GD-LIVE-100")
+    runtime.add_transcript_segment("P001", 1.0, 3.5, "Hello team")
+    runtime.add_transcript_segment("P002", 4.0, 6.0, "I agree with you")
+
+    t2 = live_service.get_transcript("GD-LIVE-100")
+    assert t2["segment_count"] == 2
+    assert len(t2["group_segments"]) == 2
+    assert "[P001] Hello team" in t2["group_transcript"]
+    assert "[P002] I agree with you" in t2["group_transcript"]
+    assert t2["participant_transcripts"]["P001"] == "Hello team"
+    assert t2["participant_transcripts"]["P002"] == "I agree with you"
+
+
+def test_evaluate_live_session_requires_ended_status(live_service, sample_scheduled_session):
+    """Test evaluate_live_session rejects non-ENDED sessions."""
+    # SCHEDULED
+    with pytest.raises(ValueError, match="Must be 'ENDED' or 'EVALUATED'"):
+        live_service.evaluate_live_session("GD-LIVE-100")
+
+    # ACTIVE
+    live_service.start_session("GD-LIVE-100")
+    with pytest.raises(ValueError, match="Must be 'ENDED' or 'EVALUATED'"):
+        live_service.evaluate_live_session("GD-LIVE-100")
+
+
+def test_evaluate_live_session_success(live_service, sample_scheduled_session):
+    """Test evaluate_live_session orchestrates evaluation, saves to repository, and marks evaluated."""
+    live_service.start_session("GD-LIVE-100")
+    runtime = live_service.get_runtime("GD-LIVE-100")
+    runtime.add_transcript_segment("P001", 1.0, 5.0, "We need to invest in solar infrastructure.")
+    runtime.add_transcript_segment("P002", 5.5, 9.0, "Storage batteries are crucial for solar.")
+    runtime.participants["P001"].speaking_time = 4.0
+    runtime.participants["P001"].word_count = 7
+    runtime.participants["P002"].speaking_time = 3.5
+    runtime.participants["P002"].word_count = 6
+
+    # End session
+    live_service.end_session("GD-LIVE-100")
+
+    # Mock orchestrator and gd_repo
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.evaluate_session.return_value = [
+        {
+            "participant_id": "P001",
+            "scorecard": {"final_score": 85.0, "scores": {"relevance": 85.0}},
+            "agent_results": [{"agent": "relevance", "score": 85.0}],
+        },
+        {
+            "participant_id": "P002",
+            "scorecard": {"final_score": 80.0, "scores": {"relevance": 80.0}},
+            "agent_results": [{"agent": "relevance", "score": 80.0}],
+        },
+        {
+            "participant_id": "P003",
+            "scorecard": {"final_score": 0.0, "scores": {"relevance": 0.0}},
+            "agent_results": [{"agent": "relevance", "score": 0.0}],
+        },
+    ]
+
+    mock_repo = MagicMock()
+    mock_repo.save_evaluation.side_effect = lambda doc: {**doc, "_id": "mock_eval_id"}
+
+    live_service._orchestrator = mock_orchestrator
+    live_service._gd_repo = mock_repo
+
+    eval_result = live_service.evaluate_live_session("GD-LIVE-100")
+
+    assert eval_result["session_id"] == "GD-LIVE-100"
+    assert eval_result["topic"] == "Future of Clean Energy"
+    assert len(eval_result["participants"]) == 3
+    assert eval_result["final_scores"]["P001"] == 85.0
+    assert eval_result["final_scores"]["P002"] == 80.0
+    assert eval_result["final_scores"]["P003"] == 0.0
+
+    mock_repo.save_evaluation.assert_called_once()
+    mock_orchestrator.evaluate_session.assert_called_once()

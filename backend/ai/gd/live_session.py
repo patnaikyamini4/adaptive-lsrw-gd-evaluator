@@ -15,6 +15,9 @@ import time
 from typing import Any
 
 
+from backend.ai.gd.live_transcript import LiveTranscriptManager
+
+
 @dataclass
 class LiveParticipant:
     participant_id: str
@@ -46,6 +49,9 @@ class LiveGDSession:
 
     participants: dict[str, LiveParticipant] = field(
         default_factory=dict
+    )
+    transcript_manager: LiveTranscriptManager = field(
+        default_factory=LiveTranscriptManager
     )
 
     def add_participant(self, participant_id: str) -> None:
@@ -189,6 +195,58 @@ class LiveGDSession:
 
         participant.word_count += max(0, count)
 
+    def add_transcript_segment(
+        self,
+        participant_id: str,
+        start: float,
+        end: float,
+        text: str,
+    ) -> None:
+        """
+        Add a transcribed speech segment to the session's chronological transcript.
+        """
+        self.transcript_manager.add_segment(
+            session_id=self.session_id,
+            participant_id=participant_id,
+            start=start,
+            end=end,
+            text=text,
+        )
+
+    def get_transcript_segments(self) -> list[dict[str, Any]]:
+        """
+        Return all chronological transcript segments.
+        """
+        return self.transcript_manager.get_segments()
+
+    def get_group_text(self) -> str:
+        """
+        Return concatenated group transcript formatted with speaker tags.
+        """
+        return self.transcript_manager.get_group_text()
+
+    def get_participant_text(self, participant_id: str) -> str:
+        """
+        Return full concatenated text spoken by a specific participant.
+        """
+        return self.transcript_manager.get_participant_text(participant_id)
+
+    def get_transcript_data(self) -> dict[str, Any]:
+        """
+        Return structured transcript summary for the live session.
+        """
+        return {
+            "session_id": self.session_id,
+            "topic": self.topic,
+            "group_transcript": self.get_group_text(),
+            "group_segments": self.get_transcript_segments(),
+            "participant_transcripts": {
+                pid: self.get_participant_text(pid)
+                for pid in self.participants
+            },
+            "segment_count": len(self.transcript_manager.segments),
+        }
+
     def get_status(self) -> dict[str, Any]:
         """
         Return the current live session state.
@@ -204,6 +262,7 @@ class LiveGDSession:
             ),
             "started": self.started_at is not None,
             "ended": self.ended_at is not None,
+            "transcript_count": len(self.transcript_manager.segments),
             "participants": {
                 participant_id: {
                     "connected": participant.connected,

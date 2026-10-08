@@ -194,6 +194,34 @@ class GDLiveAudioService:
         if word_count > 0:
             live_session.add_words(clean_participant_id, word_count)
 
+        # Step 4: Accumulate chronological transcript segments in LiveGDSession
+        if has_speech and hasattr(live_session, "add_transcript_segment"):
+            if event is not None and event.session_start > 0:
+                base_start = float(event.session_start)
+            else:
+                current_time = live_session.session_time() if hasattr(live_session, "session_time") else 0.0
+                base_start = max(0.0, float(current_time) - audio_duration)
+
+            if transcript_segments:
+                for seg in transcript_segments:
+                    seg_text = str(seg.get("text") or "").strip()
+                    if seg_text:
+                        seg_start = base_start + float(seg.get("start") or 0.0)
+                        seg_end = base_start + float(seg.get("end") or 0.0)
+                        live_session.add_transcript_segment(
+                            participant_id=clean_participant_id,
+                            start=round(seg_start, 3),
+                            end=round(seg_end, 3),
+                            text=seg_text,
+                        )
+            elif transcript_text:
+                live_session.add_transcript_segment(
+                    participant_id=clean_participant_id,
+                    start=round(base_start, 3),
+                    end=round(base_start + audio_duration, 3),
+                    text=transcript_text,
+                )
+
         # Update event object if passed
         if event is not None:
             event.transcript = transcript_text

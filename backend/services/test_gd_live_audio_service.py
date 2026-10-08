@@ -685,3 +685,35 @@ def test_real_sample_audio_vad_integration(mock_session_service, active_session_
     p001 = runtime.participants["P001"]
     assert p001.speaking_time > 0.0
     assert p001.turn_count == 1
+
+
+def test_audio_event_accumulates_live_transcript_segments(
+    mock_session_service, active_session_setup, mock_vad, mock_asr, tmp_path
+):
+    """Test that process_audio_event appends transcribed segments into LiveGDSession transcript manager."""
+    dummy_wav = tmp_path / "speaker.wav"
+    dummy_wav.write_bytes(b"RIFFdummywavebytes")
+
+    live_service = active_session_setup["live_service"]
+    audio_service = GDLiveAudioService(
+        session_service=mock_session_service,
+        live_service=live_service,
+        vad_service=mock_vad,
+        asr_service=mock_asr,
+    )
+
+    result = audio_service.process_audio_event(
+        session_id="GD-LIVE-200",
+        participant_id="P001",
+        audio_path=str(dummy_wav),
+    )
+
+    assert result["transcript"] == "Solar energy is essential for sustainable progress."
+    runtime = live_service.get_runtime("GD-LIVE-200")
+    segments = runtime.get_transcript_segments()
+    assert len(segments) == 2
+    assert segments[0]["participant_id"] == "P001"
+    assert segments[0]["text"] == "Solar energy is essential"
+    assert segments[1]["participant_id"] == "P001"
+    assert segments[1]["text"] == "for sustainable progress."
+    assert "[P001] Solar energy is essential" in runtime.get_group_text()
