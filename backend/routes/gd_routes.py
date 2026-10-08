@@ -12,8 +12,11 @@ HTTP Request -> Route Validation -> GDEvaluationService -> GDEvaluationRepositor
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+import uuid
 from flask import Blueprint, jsonify, request
+from werkzeug.utils import secure_filename
 
 from backend.services.gd_live_audio_service import GDLiveAudioService
 from backend.services.gd_live_service import GDLiveService
@@ -860,3 +863,163 @@ def process_gd_audio_event(session_id: str):
         "result": result,
         **result,
     }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/transcript", methods=["GET"])
+def get_gd_session_transcript(session_id: str):
+    """
+    Retrieve live chronological transcript segments and speaker breakdown for a GD session.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    try:
+        transcript_data = gd_live_service.get_transcript(session_id.strip())
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to retrieve live transcript: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "session_id": session_id.strip(),
+        **transcript_data,
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/audio/upload", methods=["POST"])
+def upload_gd_audio_file(session_id: str):
+    """
+    Upload and process a live audio chunk / file directly (multipart/form-data)
+    for an ACTIVE GD session participant.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    participant_id = request.form.get("participant_id") or request.args.get("participant_id")
+    if not participant_id or not str(participant_id).strip():
+        return jsonify({
+            "status": "error",
+            "message": "'participant_id' is required and must be a non-empty string",
+        }), 400
+
+    audio_file = (
+        request.files.get("file")
+        or request.files.get("audio")
+        or request.files.get("audio_file")
+    )
+    if audio_file is None or audio_file.filename == "":
+        return jsonify({
+            "status": "error",
+            "message": "Audio file is required in multipart/form-data ('file', 'audio', or 'audio_file')",
+        }), 400
+
+    # Create staging directory for session live audio
+    clean_session_id = session_id.strip()
+    upload_dir = Path("uploads/live_sessions") / clean_session_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = secure_filename(audio_file.filename) or f"{uuid.uuid4().hex[:8]}.wav"
+    staging_filename = f"{participant_id.strip()}_{int(datetime.now().timestamp()*1000)}_{filename}"
+    target_path = upload_dir / staging_filename
+
+    try:
+        audio_file.save(str(target_path))
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to save uploaded audio file: {str(e)}",
+        }), 500
+
+    try:
+        result = gd_live_audio_service.process_audio_event(
+            session_id=clean_session_id,
+            participant_id=participant_id.strip(),
+            audio_path=str(target_path),
+        )
+    except FileNotFoundError as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 404
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except RuntimeError as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Failed to process live audio event: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "message": f"Audio file uploaded and processed for participant '{participant_id.strip()}'",
+        "result": result,
+        **result,
+    }), 200
+
+
+@gd_bp.route("/sessions/<session_id>/evaluate", methods=["POST"])
+def evaluate_live_gd_session(session_id: str):
+    """
+    Trigger end-to-end evaluation for an ENDED live Group Discussion session
+    using accumulated in-memory runtime audio metrics and transcripts.
+    """
+    if not session_id or not session_id.strip():
+        return jsonify({
+            "status": "error",
+            "message": "'session_id' parameter is required",
+        }), 400
+
+    try:
+        persisted_doc = gd_live_service.evaluate_live_session(session_id.strip())
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            return jsonify({
+                "status": "error",
+                "message": str(e),
+            }), 404
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Live GD evaluation pipeline failed: {str(e)}",
+        }), 500
+
+    return jsonify({
+        "status": "success",
+        "message": f"Live GD session '{session_id.strip()}' evaluated and persisted successfully",
+        "evaluation": persisted_doc,
+    }), 201
