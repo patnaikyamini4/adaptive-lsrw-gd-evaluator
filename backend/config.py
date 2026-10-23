@@ -7,7 +7,7 @@ ENV_PATH = os.path.join(BASE_DIR, ".env")
 
 load_dotenv(ENV_PATH)
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+ENVIRONMENT = (os.getenv("ENVIRONMENT") or "development").strip().lower()
 
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:

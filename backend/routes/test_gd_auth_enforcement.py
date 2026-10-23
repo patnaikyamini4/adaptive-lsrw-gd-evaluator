@@ -318,6 +318,68 @@ def test_candidate_scorecard_sanitized(client, candidate_p1):
     assert len(data["participants"]) == 1
     assert data["participants"][0]["participant_id"] == "CAND-P001"
 
+def test_candidate_nested_evaluation_fields_sanitized(client, coordinator_a, candidate_p1):
+    """
+    Verify candidate privacy across all nested evaluation fields:
+    agent_results, objective_features, interaction_features are stripped of peer data for candidates,
+    while coordinators retain full authorized multi-participant access.
+    """
+    full_evaluation = {
+        "session_id": "GD-AUTH-100",
+        "topic": "Future of Autonomous Agents",
+        "session_duration": 300.0,
+        "group_transcript": "[P1] Agree.\n[P2] Disagree.",
+        "group_segments": [],
+        "participants": [
+            {"participant_id": "CAND-P001", "speaking_time": 50.0},
+            {"participant_id": "CAND-P002", "speaking_time": 60.0},
+        ],
+        "scorecards": {
+            "CAND-P001": {"score": 85},
+            "CAND-P002": {"score": 92},
+        },
+        "final_scores": {
+            "CAND-P001": 85,
+            "CAND-P002": 92,
+        },
+        "agent_results": {
+            "CAND-P001": {"fluency": 80, "relevance": 90},
+            "CAND-P002": {"fluency": 95, "relevance": 88},
+        },
+        "objective_features": {
+            "CAND-P001": {"wpm": 130, "speaking_time": 50.0},
+            "CAND-P002": {"wpm": 145, "speaking_time": 60.0},
+        },
+        "interaction_features": {
+            "CAND-P001": {"interruptions_made": 1},
+            "CAND-P002": {"interruptions_made": 3},
+        },
+    }
+
+    with patch("backend.routes.gd_routes.get_evaluation", return_value=full_evaluation):
+        # 1. Candidate P1 checks evaluation
+        res_cand = client.get("/api/gd/evaluations/GD-AUTH-100", headers=candidate_p1["headers"])
+        assert res_cand.status_code == 200
+        cand_data = res_cand.get_json()["evaluation"]
+        assert cand_data["sanitized"] is True
+        # P1's nested features are present
+        assert "CAND-P001" in cand_data["agent_results"]
+        assert "CAND-P001" in cand_data["objective_features"]
+        assert "CAND-P001" in cand_data["interaction_features"]
+        # P2's nested features MUST be stripped
+        assert "CAND-P002" not in cand_data["agent_results"]
+        assert "CAND-P002" not in cand_data["objective_features"]
+        assert "CAND-P002" not in cand_data["interaction_features"]
+
+        # 2. Coordinator checks evaluation -> sees all participants in nested features
+        res_coord = client.get("/api/gd/evaluations/GD-AUTH-100", headers=coordinator_a["headers"])
+        assert res_coord.status_code == 200
+        coord_data = res_coord.get_json()["evaluation"]
+        assert "CAND-P001" in coord_data["agent_results"]
+        assert "CAND-P002" in coord_data["agent_results"]
+        assert "CAND-P001" in coord_data["objective_features"]
+        assert "CAND-P002" in coord_data["objective_features"]
+
 
 def test_outsider_cannot_view_evaluation(client, candidate_outsider):
     """Candidate not in evaluation participants receives 403."""

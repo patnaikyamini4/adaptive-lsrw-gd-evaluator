@@ -272,7 +272,7 @@ def get_gd_evaluation(session_id: str):
             user_id: evaluation.get("participant_transcripts", {}).get(user_id)
         } if isinstance(evaluation.get("participant_transcripts"), dict) and user_id in evaluation.get("participant_transcripts", {}) else {}
 
-        evaluation = {
+        sanitized_eval = {
             "session_id": evaluation.get("session_id"),
             "topic": evaluation.get("topic"),
             "session_duration": evaluation.get("session_duration"),
@@ -287,6 +287,24 @@ def get_gd_evaluation(session_id: str):
             "updated_at": evaluation.get("updated_at"),
             "sanitized": True,
         }
+
+        # Check and sanitize nested evaluation features for candidate privacy
+        if "agent_results" in evaluation:
+            sanitized_eval["agent_results"] = {
+                user_id: evaluation.get("agent_results", {}).get(user_id)
+            } if isinstance(evaluation.get("agent_results"), dict) and user_id in evaluation.get("agent_results", {}) else {}
+
+        if "objective_features" in evaluation:
+            sanitized_eval["objective_features"] = {
+                user_id: evaluation.get("objective_features", {}).get(user_id)
+            } if isinstance(evaluation.get("objective_features"), dict) and user_id in evaluation.get("objective_features", {}) else {}
+
+        if "interaction_features" in evaluation:
+            sanitized_eval["interaction_features"] = {
+                user_id: evaluation.get("interaction_features", {}).get(user_id)
+            } if isinstance(evaluation.get("interaction_features"), dict) and user_id in evaluation.get("interaction_features", {}) else {}
+
+        evaluation = sanitized_eval
 
     return jsonify({
         "status": "success",

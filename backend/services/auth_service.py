@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 from typing import Any, Optional
 import uuid
 
@@ -39,6 +40,9 @@ class AuthService:
     """
     Manages identity verification and JWT session tokens.
     """
+
+    # Thread lock guaranteeing atomic cooldown evaluation and OTP challenge persistence
+    _otp_lock = threading.Lock()
 
     # In-memory register used strictly in test and development modes to capture
     # generated OTPs for automated test verification without sending real emails.
@@ -81,48 +85,49 @@ class AuthService:
         if not EMAIL_REGEX.match(clean_email):
             raise ValueError(f"Invalid email address format: '{clean_email}'")
 
-        now = datetime.now(timezone.utc)
+        with AuthService._otp_lock:
+            now = datetime.now(timezone.utc)
 
-        # 1. Enforce 60-second rate-limiting cooldown per email
-        existing = self.otp_repo.get_otp(clean_email)
-        if existing:
-            last_req = existing.get("updated_at") or existing.get("created_at")
-            if last_req:
-                if isinstance(last_req, str):
-                    try:
-                        last_req = datetime.fromisoformat(last_req)
-                    except ValueError:
-                        last_req = None
-                if last_req and last_req.tzinfo is None:
-                    last_req = last_req.replace(tzinfo=timezone.utc)
+            # 1. Enforce 60-second rate-limiting cooldown per email
+            existing = self.otp_repo.get_otp(clean_email)
+            if existing:
+                last_req = existing.get("updated_at") or existing.get("created_at")
                 if last_req:
-                    elapsed = (now - last_req).total_seconds()
-                    if elapsed < OTP_COOLDOWN_SECONDS:
-                        remaining_wait = max(1, int(OTP_COOLDOWN_SECONDS - elapsed))
-                        raise ValueError(
-                            f"Please wait {remaining_wait} seconds before requesting a new verification code."
-                        )
+                    if isinstance(last_req, str):
+                        try:
+                            last_req = datetime.fromisoformat(last_req)
+                        except ValueError:
+                            last_req = None
+                    if last_req and last_req.tzinfo is None:
+                        last_req = last_req.replace(tzinfo=timezone.utc)
+                    if last_req:
+                        elapsed = (now - last_req).total_seconds()
+                        if elapsed < OTP_COOLDOWN_SECONDS:
+                            remaining_wait = max(1, int(OTP_COOLDOWN_SECONDS - elapsed))
+                            raise ValueError(
+                                f"Please wait {remaining_wait} seconds before requesting a new verification code."
+                            )
 
-        # 2. Generate 6-digit cryptographically random OTP
-        otp = f"{secrets.randbelow(900000) + 100000}"
-        otp_hash = self._hash_otp(clean_email, otp)
-        expires_at = now + timedelta(seconds=OTP_EXPIRY_SECONDS)
+            # 2. Generate 6-digit cryptographically random OTP
+            otp = f"{secrets.randbelow(900000) + 100000}"
+            otp_hash = self._hash_otp(clean_email, otp)
+            expires_at = now + timedelta(seconds=OTP_EXPIRY_SECONDS)
 
-        # 3. Store in OTP repository with attempts limit and timestamp
-        self.otp_repo.store_otp(
-            email=clean_email,
-            otp_hash=otp_hash,
-            expires_at=expires_at,
-            attempts_left=OTP_MAX_ATTEMPTS,
-            purpose="login",
-        )
+            # 3. Store in OTP repository with attempts limit and timestamp
+            self.otp_repo.store_otp(
+                email=clean_email,
+                otp_hash=otp_hash,
+                expires_at=expires_at,
+                attempts_left=OTP_MAX_ATTEMPTS,
+                purpose="login",
+            )
 
-        # 4. Dispatch OTP according to environment (never log actual OTP value)
-        if ENVIRONMENT != "production":
-            AuthService._test_sent_otps[clean_email] = otp
-            logger.info(f"[AUTH] Generated OTP challenge for {clean_email}")
-        else:
-            self._send_production_email(clean_email, otp)
+            # 4. Dispatch OTP according to environment (never log actual OTP value)
+            if ENVIRONMENT != "production":
+                AuthService._test_sent_otps[clean_email] = otp
+                logger.info(f"[AUTH] Generated OTP challenge for {clean_email}")
+            else:
+                self._send_production_email(clean_email, otp)
 
         return {
             "status": "success",

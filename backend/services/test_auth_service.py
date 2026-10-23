@@ -296,3 +296,51 @@ def test_test_otp_capture_available_in_development_and_testing():
     otp = AuthService.get_test_otp("dev_test@example.com")
     assert otp == "654321"
 
+
+def test_request_otp_production_does_not_populate_test_sent_otps(auth_service, monkeypatch):
+    """Confirm test OTP register is never populated when ENVIRONMENT is production."""
+    monkeypatch.setattr("backend.services.auth_service.ENVIRONMENT", "production")
+    monkeypatch.setattr(auth_service, "_send_production_email", lambda email, otp: None)
+
+    auth_service.request_otp("prod_user@example.com")
+    assert "prod_user@example.com" not in AuthService._test_sent_otps
+    with pytest.raises(PermissionError, match="Test OTP capture is not available in production"):
+        AuthService.get_test_otp("prod_user@example.com")
+
+
+def test_request_otp_concurrent_requests_safe(auth_service):
+    """
+    Verify cooldown behavior under concurrent requests.
+    When multiple simultaneous requests are made for the same email:
+    Exactly one succeeds and initiates cooldown; subsequent calls are blocked with 429/ValueError,
+    and the active challenge is never overwritten.
+    """
+    import concurrent.futures
+
+    email = "concurrent_tester@example.com"
+    success_count = 0
+    cooldown_error_count = 0
+
+    def attempt_request():
+        return auth_service.request_otp(email)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(attempt_request) for _ in range(5)]
+        for f in concurrent.futures.as_completed(futures):
+            try:
+                res = f.result()
+                if res.get("status") == "success":
+                    success_count += 1
+            except ValueError as e:
+                if "please wait" in str(e).lower():
+                    cooldown_error_count += 1
+
+    assert success_count == 1
+    assert cooldown_error_count == 4
+    # The initial OTP must still be intact and valid
+    otp = AuthService.get_test_otp(email)
+    assert otp is not None
+    # Can verify successfully with the intact OTP
+    verify_res = auth_service.verify_otp(email, otp)
+    assert verify_res["status"] == "success"
+
