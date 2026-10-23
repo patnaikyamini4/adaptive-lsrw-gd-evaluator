@@ -13,10 +13,19 @@ from backend.app import app
 
 @pytest.fixture
 def client():
-    """Create a Flask test client for API testing."""
+    """Create a Flask test client for API testing with coordinator authentication."""
+    from backend.services.auth_service import AuthService
+    auth_service = AuthService()
+    token = auth_service.create_access_token({
+        "user_id": "COORD-1",
+        "email": "coordinator@example.com",
+        "role": "COORDINATOR",
+        "display_name": "Coordinator",
+    })
     app.config["TESTING"] = True
-    with app.test_client() as client:
-        yield client
+    with app.test_client() as test_client:
+        test_client.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+        yield test_client
 
 
 @pytest.fixture

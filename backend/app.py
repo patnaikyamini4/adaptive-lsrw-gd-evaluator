@@ -3,10 +3,12 @@ from flask_cors import CORS
 
 from backend.routes.lsrw_routes import lsrw_bp
 from backend.routes.gd_routes import gd_bp
+from backend.routes.auth_routes import auth_bp
 
 app = Flask(__name__)
 CORS(app)
 
+app.register_blueprint(auth_bp)
 app.register_blueprint(lsrw_bp)
 app.register_blueprint(gd_bp)
 

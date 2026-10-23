@@ -14,12 +14,76 @@ import pytest
 from backend.app import app
 
 
+from backend.services.auth_service import AuthService
+
+
+class AuthTestClient:
+    """Test client wrapper injecting signed JWTs for coordinator and candidates."""
+    def __init__(self, test_client):
+        self._client = test_client
+        auth_service = AuthService()
+        self.coord_token = auth_service.create_access_token({
+            "user_id": "COORD-1",
+            "email": "coord@example.com",
+            "role": "COORDINATOR",
+            "display_name": "Coordinator",
+        })
+        self.p1_token = auth_service.create_access_token({
+            "user_id": "P1",
+            "email": "p1@example.com",
+            "role": "CANDIDATE",
+            "display_name": "Candidate P1",
+        })
+
+    def _prepare_kwargs(self, url: str, kwargs: dict) -> dict:
+        headers = kwargs.setdefault("headers", {})
+        if "Authorization" not in headers:
+            if "/audio/upload" in url:
+                data = kwargs.get("data")
+                if isinstance(data, dict) and data.get("participant_id") == "P1":
+                    headers["Authorization"] = f"Bearer {self.p1_token}"
+                elif isinstance(data, dict) and "participant_id" not in data:
+                    headers["Authorization"] = f"Bearer {self.p1_token}"
+                else:
+                    headers["Authorization"] = f"Bearer {self.coord_token}"
+            else:
+                headers["Authorization"] = f"Bearer {self.coord_token}"
+        return kwargs
+
+    def get(self, *args, **kwargs):
+        self._prepare_kwargs(args[0], kwargs)
+        return self._client.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        self._prepare_kwargs(args[0], kwargs)
+        return self._client.post(*args, **kwargs)
+
+
 @pytest.fixture
 def client():
-    """Create Flask test client."""
+    """Create Flask test client wrapped with auth token injection."""
     app.config["TESTING"] = True
-    with app.test_client() as client:
-        yield client
+    with app.test_client() as test_client:
+        yield AuthTestClient(test_client)
+
+
+@pytest.fixture(autouse=True)
+def mock_session_service():
+    """Default mock for gd_session_service so endpoints don't reach remote Atlas."""
+    mock = MagicMock()
+    def get_session_side_effect(session_id):
+        if session_id == "NONEXISTENT":
+            raise ValueError(f"GD session '{session_id}' not found")
+        return {
+            "session_id": session_id,
+            "topic": "Clean Energy",
+            "coordinator_id": "COORD-1",
+            "participant_ids": ["P1", "P2"],
+            "status": "ACTIVE",
+        }
+    mock.get_session.side_effect = get_session_side_effect
+    with patch("backend.routes.gd_routes.gd_session_service", mock):
+        yield mock
 
 
 # ==============================================================================
